@@ -70,6 +70,18 @@ and is only intended to produce a compile_commands.json at configure time for \
 use by clangd or another language server."
 )
 
+set(ORDERING_PLUGIN_API_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../evolve/plugin_api"
+    CACHE PATH
+"Directory containing ordering_plugin_api.h, the C ABI between MCGS and \
+move-ordering plugins (--ordering-plugin). The master copy lives in \
+evolve/plugin_api next to this repository."
+)
+
+if (NOT EXISTS "${ORDERING_PLUGIN_API_DIR}/ordering_plugin_api.h")
+    message(FATAL_ERROR "ordering_plugin_api.h not found in \
+ORDERING_PLUGIN_API_DIR=\"${ORDERING_PLUGIN_API_DIR}\"")
+endif()
+
 ############################## Override options if EMIT_DUMMY enabled
 if (EMIT_DUMMY)
     set(DEBUG "2")
@@ -313,7 +325,11 @@ target_compile_definitions(mcgs_flags INTERFACE
 
 target_include_directories(mcgs_flags INTERFACE
     src
+    ${ORDERING_PLUGIN_API_DIR}
 )
+
+# dlopen for --ordering-plugin
+target_link_libraries(mcgs_flags INTERFACE ${CMAKE_DL_LIBS})
 
 #################### MCGS_test executable flags
 add_library(mcgs_test_flags INTERFACE)
@@ -336,7 +352,10 @@ target_link_libraries(mcgs_test_flags INTERFACE
 target_include_directories(mcgs_test_flags INTERFACE
     src
     test
+    ${ORDERING_PLUGIN_API_DIR}
 )
+
+target_link_libraries(mcgs_test_flags INTERFACE ${CMAKE_DL_LIBS})
 
 ############################## Create executables and other targets
 

@@ -174,6 +174,8 @@ extern global_option<bool> imp_wrapper_alternate_color;
 
 extern global_option<bool> play_normalize;
 extern global_option<bool> dedupe_movegen;
+// Abort partisan search after this many nodes (0 = no limit). See node_limit.h
+extern global_option<uint64_t> node_limit;
 
 extern global_option<bool> silence_warnings;
 extern global_option<bool> print_ttable_size;

@@ -31,6 +31,7 @@ enum test_case_status_enum
     TEST_CASE_STATUS_FAIL,
     TEST_CASE_STATUS_PASS,
     TEST_CASE_STATUS_COMPLETED,
+    TEST_CASE_STATUS_NODE_LIMIT, // aborted by --node-limit (see node_limit.h)
 };
 
 ////////////////////////////////////////////////// enum to string functions

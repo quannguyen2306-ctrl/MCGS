@@ -20,6 +20,8 @@
 #include "dominated_moves.h"
 #include "transposition.h"
 #include "timeout_token.h"
+#include "node_limit.h"
+#include "ordering_plugin_api.h"
 #include "ThValue.h"
 
 ////////////////////////////////////////////////// Forward declarations
@@ -36,6 +38,8 @@ class seg_replacer;
 ////////////////////////////////////////////////// Simple types
 typedef std::vector<std::optional<ThValue>> temperature_vec_t;
 typedef std::vector<std::shared_ptr<const db_dom_moves_t>> dom_object_vec_t;
+// DB outcome class per subgame; has a value IFF the subgame was a DB hit
+typedef std::vector<std::optional<outcome_class>> outcome_vec_t;
 
 struct ttable_sumgame_entry
 {
@@ -219,8 +223,10 @@ public:
     void simplify_basic();
     void undo_simplify_basic();
 
-    std::optional<solve_result> db_lookup_pass(temperature_vec_t& temperatures,
-                                               dom_object_vec_t& dom_objects);
+    // `outcomes` (optional) receives each DB-hit subgame's outcome class
+    std::optional<solve_result> db_lookup_pass(
+        temperature_vec_t& temperatures, dom_object_vec_t& dom_objects,
+        outcome_vec_t* outcomes = nullptr);
     void undo_db_lookup_pass();
 
     void split_and_normalize(); // for DB
@@ -321,14 +327,19 @@ class sumgame_move_generator : public move_generator
 {
 public:
     /*
-        Either/both pointers can be nullptr.
+        Any of the pointers can be nullptr.
 
         When not nullptr, uses std::move to steal the contents of the vectors.
         Caller still owns the (now emptied) vectors.
+
+        `outcomes` and `depth` are only used when an ordering plugin is
+        loaded (see ordering_plugin.h).
     */
     sumgame_move_generator(const sumgame& sum, bw to_play,
                            temperature_vec_t* temperatures,
-                           dom_object_vec_t* dom_move_objects);
+                           dom_object_vec_t* dom_move_objects,
+                           outcome_vec_t* outcomes = nullptr,
+                           uint64_t depth = 0);
 
     void operator++() override;
     operator bool() const override;
@@ -347,12 +358,28 @@ private:
     move_generator* _make_subgame_move_generator(
         const game& g, const db_dom_moves_t* dom_moves_object) const;
 
+    /*
+        Ordering plugin hook: builds features for the non-number subgames
+        (already in default order), scores them, and stable-sorts
+        _subgame_pairs by (score desc, default position asc).
+    */
+    void _apply_plugin_order(const sumgame& sum,
+                             const temperature_vec_t& temperatures,
+                             const outcome_vec_t& outcomes, size_t n_numbers,
+                             uint64_t depth);
+
     //const sumgame& _sum;
 
     dom_object_vec_t _dom_objects;
 
     std::vector<std::pair<int, const game*>> _subgame_pairs;
     size_t _subgame_idx_local; // index into _subgame_pairs
+
+    // Plugin-only data: features of the non-number prefix of _subgame_pairs
+    // (same order), and the node context shared by all score_* calls
+    bool _use_plugin;
+    std::vector<mcgs_subgame_features> _subgame_features;
+    mcgs_node_context _node_ctx;
 
     const game* _subgame_current;
     std::unique_ptr<move_generator> _mg_current;
@@ -500,6 +527,9 @@ inline hash_t sumgame::game_hash() const
 
 inline bool sumgame::_over_time() const
 {
+    if (node_limit::active() && node_limit::reached())
+        return true;
+
     if (_timeout_tok.has_value())
         return _timeout_tok->stop_requested();
     return false;

@@ -21,6 +21,7 @@
 #include "global_database.h"
 #include "global_options.h"
 #include "impartial_sumgame.h"
+#include "node_limit.h"
 #include "search_graph_debug.h"
 #include "solver_stats.h"
 #include "stopwatch.h"
@@ -153,7 +154,13 @@ void test_case_solve_bw::_run_impl(unsigned long long timeout)
     if (result.has_value())
         result_string = result->win ? "Win" : "Loss";
 
-    _csv_row.fill_post_test_fields(result_string, sw.get_duration_ms());
+    // Aborted by the node limit rather than the clock
+    if (!result.has_value() && node_limit::reached())
+        _csv_row.fill_post_test_fields_verbose(result_string,
+                                               sw.get_duration_ms(),
+                                               TEST_CASE_STATUS_NODE_LIMIT);
+    else
+        _csv_row.fill_post_test_fields(result_string, sw.get_duration_ms());
 }
 
 ////////////////////////////////////////////////// test_case_solve_n methods
@@ -295,6 +302,7 @@ void test_case_winning_moves::_run_impl(unsigned long long timeout)
     switch (status)
     {
         case TEST_CASE_STATUS_TIMEOUT:
+        case TEST_CASE_STATUS_NODE_LIMIT:
         case TEST_CASE_STATUS_COMPLETED:
         {
             _csv_row.fill_post_test_fields(result_string, duration_ms);
@@ -425,6 +433,7 @@ void test_case_thermograph::_run_impl(unsigned long long timeout)
     switch (status)
     {
         case TEST_CASE_STATUS_TIMEOUT:
+        case TEST_CASE_STATUS_NODE_LIMIT:
         case TEST_CASE_STATUS_COMPLETED:
         case TEST_CASE_STATUS_FAIL:
         {

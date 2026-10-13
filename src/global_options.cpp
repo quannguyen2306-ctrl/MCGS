@@ -128,6 +128,7 @@ INIT_GLOBAL_WITH_SUMMARY(imp_wrapper_alternate_color, bool, true);
 
 INIT_GLOBAL_WITH_SUMMARY(play_normalize, bool, true);
 INIT_GLOBAL_WITH_SUMMARY(dedupe_movegen, bool, true);
+INIT_GLOBAL_WITH_SUMMARY(node_limit, uint64_t, 0);
 
 // These WILL NOT be printed with ./MCGS --print-optimizations
 INIT_GLOBAL_WITHOUT_SUMMARY(silence_warnings, bool, false);

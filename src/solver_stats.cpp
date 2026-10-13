@@ -32,6 +32,8 @@ void solver_stats::reset()
         search_node_hashes = std::unordered_set<hash_t>();
     max_search_depth = 0;
 
+    feature_probes = 0;
+
     // Subgames
     max_subgame_count = 0;
 

@@ -230,6 +230,8 @@ void csv_row::fill_post_test_fields_verbose(
     this->initial_subgame_count = stats.initial_subgame_count;
     this->max_subgame_count = stats.max_subgame_count;
 
+    this->feature_probes = stats.feature_probes;
+
     assert(has_post_test_fields());
 }
 
@@ -304,6 +306,8 @@ vector<string> csv_row::get_row_field_strings() const
 
     CSV_FIELD(input_hash, input_hash.value());
 
+    CSV_FIELD(feature_probes, to_string(feature_probes.value()));
+
     return row_strings;
 }
 
@@ -341,6 +345,8 @@ vector<string> csv_row::get_header_field_strings()
     header.push_back("Max Subgames");
 
     header.push_back("Input hash");
+
+    header.push_back("Feature Probes");
 
     return header;
 }

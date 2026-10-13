@@ -67,6 +67,11 @@ struct cli_options
 
     test_filter_enum test_filter_type;
 
+    // Move-ordering plugin (shared library), see ordering_plugin.h
+    std::optional<std::string> ordering_plugin_file_name;
+    // Per-test-case node limits, see node_limit.h
+    std::optional<std::string> node_limits_file_name;
+
     static constexpr const unsigned long long DEFAULT_TEST_TIMEOUT = 500;
 };
 

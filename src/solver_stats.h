@@ -44,6 +44,10 @@ struct solver_stats
     std::optional<std::unordered_set<hash_t>> search_node_hashes;
     uint64_t max_search_depth;
 
+    // Ordering plugin T2 look-ahead probes (play/undo pairs), see
+    // ordering_plugin.h. Not counted as search nodes.
+    uint64_t feature_probes;
+
     // Subgames
     size_t max_subgame_count;
 
@@ -69,6 +73,9 @@ void reset_global_stats();
 // Report TT/DB access
 void report_tt_access(bool hit);
 void report_db_access(bool hit);
+
+// Report one ordering-plugin feature probe (T2 play/undo pair)
+void report_feature_probe();
 
 // Report per-node
 void report_search_node(const sumgame& sum, ebw to_play, uint64_t depth);
@@ -145,6 +152,11 @@ inline void report_db_access(bool hit)
         __global_stats.db_hits++;
     else
         __global_stats.db_misses++;
+}
+
+inline void report_feature_probe()
+{
+    __global_stats.feature_probes++;
 }
 
 inline void report_search_node(const sumgame& sum, ebw to_play, uint64_t depth)

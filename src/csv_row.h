@@ -103,6 +103,9 @@ public:
     std::optional<size_t> max_subgame_count;     // post test (!)
 
     std::optional<std::string> input_hash; // visitor (!)
+
+    // Last column: ordering-plugin T2 feature probes (see ordering_plugin.h)
+    std::optional<uint64_t> feature_probes; // post test (!)
 };
 
 /*

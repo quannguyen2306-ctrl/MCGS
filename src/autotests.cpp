@@ -18,6 +18,7 @@
 #include "hashing.h"
 #include "file_iterator.h"
 #include "exit_signal.h"
+#include "node_limit.h"
 
 //////////////////////////////////////////////////
 using namespace std;
@@ -105,6 +106,8 @@ void run_autotests(const string& root_test_directory,
                 row.fill_autotest_fields(relative_file_path.string(), file_test_idx);
 
                 // Run the test
+                node_limit::set_current_case(relative_file_path.string(),
+                                             file_test_idx);
                 test_case->run(test_timeout);
 
                 // Write CSV row

@@ -16,6 +16,8 @@
 #include "init_random.h"
 #include "init_serialization.h"
 #include "init_sumgame.h"
+#include "node_limit.h"
+#include "ordering_plugin.h"
 #include "throw_assert.h"
 #include "type_table.h"
 #include "warn_on_exit.h"
@@ -76,6 +78,14 @@ void mcgs_init_2(const cli_options& opts)
     mcgs_init::init_database(opts.db_file_name, init_type,
                              opts.db_config_string);
 
+    // Move ordering hook and node limits
+    if (opts.ordering_plugin_file_name.has_value())
+        ordering_plugin::load(opts.ordering_plugin_file_name.value());
+
+    if (opts.node_limits_file_name.has_value())
+        node_limit::load_limits_file(opts.node_limits_file_name.value());
+
+    node_limit::reset_current_case();
 }
 
 void mcgs_init_2()

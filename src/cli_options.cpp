@@ -212,6 +212,29 @@ void print_help_message(const string& exec_name)
     print_flag(global::dedupe_movegen.no_flag(), "Don't skip move generators "
                                                  "for duplicate subgames.");
 
+    cout << "Move ordering flags:" << endl;
+    cout << endl;
+
+    print_flag("--ordering-plugin <file name>",
+               "Load a move-ordering plugin (shared library exporting "
+               "score_subgame and score_move, see "
+               "ordering_plugin_api.h). Subgames and moves of the partisan "
+               "search are then ordered by the plugin's scores. Fails if the "
+               "file can't be loaded or an export is missing.");
+
+    print_flag(global::node_limit.flag() + " <# nodes>",
+               "Abort a partisan search after this many search nodes. The "
+               "test is reported with status NODE_LIMIT. 0 means no limit. "
+               "Default: " +
+                   global::node_limit.get_default_str() + ".");
+
+    print_flag("--node-limits-file <file name>",
+               "Per-test-case node limits for --run-tests. Lines are "
+               "\"<case>,<limit>\" (0-based case number within each .test "
+               "file) or \"<file>,<case>,<limit>\" (<file> as printed in the "
+               "CSV \"File\" column). Cases not listed use " +
+                   global::node_limit.flag() + ".");
+
     cout << "Misc options flags:" << endl;
     print_flag(global::random_seed.flag() + " <seed>",
                "Set seed for main random generator. "
@@ -898,6 +921,58 @@ cli_options parse_args(int argc, const char** argv, bool silent)
         if (arg == global::dedupe_movegen.no_flag())
         {
             global::dedupe_movegen.set(false);
+            continue;
+        }
+
+        // MOVE ORDERING OPTIONS
+        if (arg == "--ordering-plugin")
+        {
+            arg_idx++;
+
+            if (arg_next.empty())
+                throw cli_options_exception(
+                    "Error: --ordering-plugin but no file name given");
+
+            opts.ordering_plugin_file_name = arg_next;
+            continue;
+        }
+
+        if (arg == global::node_limit.flag())
+        {
+            arg_idx++;
+
+            if (arg_next.empty())
+                throw cli_options_exception("Error: got " +
+                                            global::node_limit.flag() +
+                                            " but no value");
+
+            try
+            {
+                static_assert(
+                    std::is_same_v<uint64_t, unsigned long long> ||
+                    std::is_same_v<uint64_t, unsigned long>);
+
+                global::node_limit.set(str_to_ull(arg_next));
+            }
+            catch (const exception& exc)
+            {
+                throw cli_options_exception(
+                    "Error: " + global::node_limit.flag() +
+                    " value not an unsigned integer, or out of range");
+            }
+
+            continue;
+        }
+
+        if (arg == "--node-limits-file")
+        {
+            arg_idx++;
+
+            if (arg_next.empty())
+                throw cli_options_exception(
+                    "Error: --node-limits-file but no file name given");
+
+            opts.node_limits_file_name = arg_next;
             continue;
         }
 

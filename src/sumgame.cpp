@@ -27,6 +27,8 @@
 #include "filtering_move_generator.h"
 #include "integral_conversion.h"
 #include "global_database.h"
+#include "ordering_plugin.h"
+#include "scored_move_generator.h"
 #include "random.h"
 #include "safe_arithmetic.h"
 #include "search_graph_debug.h"
@@ -574,9 +576,11 @@ void sumgame::undo_simplify_basic()
             zeroed before use (though the RATIONAL component is still valid).
 */
 optional<solve_result> sumgame::db_lookup_pass(temperature_vec_t& temperatures,
-                                               dom_object_vec_t& dom_objects)
+                                               dom_object_vec_t& dom_objects,
+                                               outcome_vec_t* outcomes)
 {
     assert(temperatures.empty() && dom_objects.empty());
+    assert(outcomes == nullptr || outcomes->empty());
     _push_undo_code(SUMGAME_UNDO_DB_LOOKUP_PASS);
 
     if (!global::use_db())
@@ -646,6 +650,14 @@ optional<solve_result> sumgame::db_lookup_pass(temperature_vec_t& temperatures,
             {
                 // Use outcome
                 oc = entry->outcome;
+
+                if (outcomes != nullptr)
+                {
+                    if (outcomes->empty())
+                        outcomes->resize(N_SUBGAMES);
+
+                    (*outcomes)[subgame_idx] = oc;
+                }
 
                 // Use thermograph
                 const shared_ptr<ThGraph>& entry_graph = entry->thermograph;
@@ -1274,6 +1286,7 @@ optional<solve_result> sumgame::_solve_impl(uint64_t depth)
 
     temperature_vec_t temperatures;
     dom_object_vec_t dom_move_objects;
+    outcome_vec_t outcomes;
 
     {
         db_replacement_pass();
@@ -1281,7 +1294,7 @@ optional<solve_result> sumgame::_solve_impl(uint64_t depth)
         simplify_basic();
 
         optional<solve_result> result =
-            db_lookup_pass(temperatures, dom_move_objects);
+            db_lookup_pass(temperatures, dom_move_objects, &outcomes);
 
         if (result.has_value())
         {
@@ -1310,7 +1323,8 @@ optional<solve_result> sumgame::_solve_impl(uint64_t depth)
 
     unique_ptr<sumgame_move_generator> mgp =
         make_unique<sumgame_move_generator>(*this, toplay, &temperatures,
-                                            &dom_move_objects);
+                                            &dom_move_objects, &outcomes,
+                                            depth);
 
     sumgame_move_generator& mg = *mgp;
 
@@ -1396,10 +1410,12 @@ void sumgame::_assert_games_unique() const
 // sumgame_move_generator methods
 sumgame_move_generator::sumgame_move_generator(
     const sumgame& sum, bw to_play, temperature_vec_t* temperatures,
-    dom_object_vec_t* dom_move_objects)
+    dom_object_vec_t* dom_move_objects, outcome_vec_t* outcomes,
+    uint64_t depth)
     : move_generator(to_play),
       //_sum(sum),
       _subgame_idx_local(0),
+      _use_plugin(ordering_plugin::loaded()),
       _subgame_current(nullptr),
       _mg_current(nullptr)
 {
@@ -1407,6 +1423,7 @@ sumgame_move_generator::sumgame_move_generator(
 
     // Steal contents of DB data vectors (if not nullptr)
     temperature_vec_t temperatures_local;
+    outcome_vec_t outcomes_local;
 
     if (temperatures != nullptr)
     {
@@ -1426,6 +1443,15 @@ sumgame_move_generator::sumgame_move_generator(
         );
     }
 
+    if (outcomes != nullptr)
+    {
+        outcomes_local = std::move(*outcomes);
+
+        assert(outcomes_local.empty() ||                               //
+               outcomes_local.size() == as_unsigned_unsafe(N_SUBGAMES) //
+        );
+    }
+
     assert(LOGICAL_IMPLIES(!global::use_db(),
                            temperatures_local.empty() && _dom_objects.empty()));
 
@@ -1435,6 +1461,9 @@ sumgame_move_generator::sumgame_move_generator(
         1. Hottest games
         2. Games without temperatures
         3. integers/rationals
+
+        With an ordering plugin loaded, 1 and 2 are replaced by the plugin's
+        score_subgame() order (ties keep the order above).
     */
     vector<pair<int, const game*>> numbers;
 
@@ -1452,17 +1481,108 @@ sumgame_move_generator::sumgame_move_generator(
             _subgame_pairs.emplace_back(i, g);
     }
 
+    // Stable, so that ties keep the input order (std::sort before the
+    // ordering hook was added; it was unstable)
     if (!temperatures_local.empty())
     {
         game_pair_sort sorter(temperatures_local);
-        sort(_subgame_pairs.begin(), _subgame_pairs.end(), sorter);
+        stable_sort(_subgame_pairs.begin(), _subgame_pairs.end(), sorter);
     }
+
+    if (_use_plugin)
+        _apply_plugin_order(sum, temperatures_local, outcomes_local,
+                            numbers.size(), depth);
 
     for (const pair<int, const game*>& game_pair : numbers)
         _subgame_pairs.push_back(game_pair);
 
     assert(_subgame_pairs.size() == n_active);
     _increment(true);
+}
+
+void sumgame_move_generator::_apply_plugin_order(
+    const sumgame& sum, const temperature_vec_t& temperatures,
+    const outcome_vec_t& outcomes, size_t n_numbers, uint64_t depth)
+{
+    assert(_use_plugin);
+
+    const size_t n_components = _subgame_pairs.size();
+
+    // Node context: sizes over all active subgames (numbers included)
+    int32_t total_size = 0;
+
+    const int N_SUBGAMES = sum.num_total_games();
+    for (int i = 0; i < N_SUBGAMES; i++)
+    {
+        const game* g = sum.subgame(i);
+        if (g->is_active())
+            total_size += g->complexity_score();
+    }
+
+    _node_ctx = ordering_plugin::make_node_context(
+        to_play(), depth, static_cast<int32_t>(n_components),
+        static_cast<int32_t>(n_numbers), total_size,
+        static_cast<int32_t>(n_components));
+
+    // Copies of each component, by local hash (as dedupe compares them)
+    vector<hash_t> hashes(n_components);
+    for (size_t i = 0; i < n_components; i++)
+        hashes[i] = _subgame_pairs[i].second->get_local_hash();
+
+    _subgame_features.resize(n_components);
+    vector<double> scores(n_components);
+
+    for (size_t i = 0; i < n_components; i++)
+    {
+        const pair<int, const game*>& game_pair = _subgame_pairs[i];
+        const int subgame_idx = game_pair.first;
+        const game& g = *game_pair.second;
+
+        int32_t n_copies = 0;
+        for (size_t j = 0; j < n_components; j++)
+            if (hashes[j] == hashes[i])
+                n_copies++;
+
+        const optional<ThValue> temperature =
+            temperatures.empty() ? optional<ThValue>()
+                                 : temperatures[subgame_idx];
+
+        const optional<outcome_class> outcome =
+            outcomes.empty() ? optional<outcome_class>()
+                             : outcomes[subgame_idx];
+
+        _subgame_features[i] = ordering_plugin::make_subgame_features(
+            g, to_play(), temperature, outcome, n_copies,
+            static_cast<int32_t>(i));
+
+        scores[i] =
+            ordering_plugin::score_subgame(_subgame_features[i], _node_ctx);
+    }
+
+    // Stable sort by score (desc); ties keep the default order
+    vector<size_t> order(n_components);
+    for (size_t i = 0; i < n_components; i++)
+        order[i] = i;
+
+    stable_sort(order.begin(), order.end(),
+                [&scores](size_t a, size_t b) -> bool
+    {
+        return scores[a] > scores[b];
+    });
+
+    vector<pair<int, const game*>> sorted_pairs;
+    vector<mcgs_subgame_features> sorted_features;
+    sorted_pairs.reserve(n_components);
+    sorted_features.reserve(n_components);
+
+    for (size_t idx : order)
+    {
+        sorted_pairs.push_back(_subgame_pairs[idx]);
+        sorted_features.push_back(_subgame_features[idx]);
+    }
+
+    _subgame_pairs = std::move(sorted_pairs);
+    _subgame_features = std::move(sorted_features);
 }
 
 
@@ -1533,8 +1653,17 @@ bool sumgame_move_generator::_increment_subgame(bool init)
         if (!_dom_objects.empty())
             dom_obj = _dom_objects[subgame_idx_nonlocal].get();
 
-        _mg_current.reset(
-            _make_subgame_move_generator(*_subgame_current, dom_obj));
+        move_generator* mg =
+            _make_subgame_move_generator(*_subgame_current, dom_obj);
+
+        // Ordering plugin: score the moves of non-number subgames. Numbers
+        // (no features, trivial move lists) keep their native generator.
+        if (_use_plugin && _subgame_idx_local < _subgame_features.size())
+            mg = new scored_move_generator(
+                mg, *_subgame_current, to_play(),
+                _subgame_features[_subgame_idx_local], _node_ctx);
+
+        _mg_current.reset(mg);
 
         return true;
     }

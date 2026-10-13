@@ -49,6 +49,8 @@ std::string test_case_status_to_string(test_case_status_enum test_case_status)
             return "PASS";
         case TEST_CASE_STATUS_COMPLETED:
             return "COMPLETED";
+        case TEST_CASE_STATUS_NODE_LIMIT:
+            return "NODE_LIMIT";
     }
 
     THROW_ASSERT(false);
